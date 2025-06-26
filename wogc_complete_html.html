@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WO-GC Data Distribution Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; background-color: #f9fafb; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        h1 { font-size: 2rem; font-weight: bold; margin-bottom: 24px; color: #111827; }
+        .controls { margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        label { font-size: 0.875rem; font-weight: 500; }
+        select, input { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 12px; min-width: 200px; }
+        .checkbox-group { display: flex; align-items: center; gap: 8px; }
+        .stats-box { background: #f3f4f6; padding: 16px; border-radius: 8px; margin-bottom: 24px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; font-size: 0.875rem; }
+        .chart-container { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .nav-buttons { display: flex; align-items: center; gap: 8px; }
+        .nav-btn { background: #3b82f6; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+        .nav-btn:hover { background: #2563eb; }
+        .nav-btn:disabled { background: #d1d5db; cursor: not-allowed; }
+        .table-container { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; font-weight: 600; }
+        tr:hover { background: #f9fafb; }
+        tr.selected { background: #dbeafe; }
+        .clickable { cursor: pointer; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .text-green { color: #059669; }
+        .text-orange { color: #d97706; font-weight: bold; }
+        .text-red { color: #dc2626; font-weight: bold; }
+        .legend { margin-top: 16px; font-size: 0.875rem; color: #6b7280; }
+        .legend ul { margin: 8px 0; padding-left: 20px; }
+        .legend li { margin: 4px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WO-GC Data Distribution Analysis</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="columnSelect">Select Column:</label>
+                <select id="columnSelect"></select>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="logTransform">
+                <label for="logTransform">Show Log Transform</label>
+            </div>
+        </div>
+        
+        <div id="statsBox" class="stats-box"></div>
+        
+        <div class="chart-container">
+            <div class="chart-header">
+                <h3 id="chartTitle">Distribution</h3>
+                <div class="nav-buttons">
+                    <button id="prevBtn" class="nav-btn">◀</button>
+                    <span id="position">1 of 24</span>
+                    <button id="nextBtn" class="nav-btn">▶</button>
+                </div>
+            </div>
+            <svg id="chart" width="600" height="300"></svg>
+        </div>
+        
+        <div class="table-container">
+            <h3 style="margin-bottom: 16px;">Skewness Summary for All Columns</h3>
+            <table id="skewnessTable">
+                <thead>
+                    <tr>
+                        <th>Compound</th>
+                        <th class="text-right">Zeros</th>
+                        <th class="text-right">Raw Skewness</th>
+                        <th class="text-right">Log Skewness</th>
+                        <th class="text-center">Improvement</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            
+            <div class="legend">
+                <p><strong>Skewness interpretation:</strong></p>
+                <ul>
+                    <li><span class="text-green">|skew| &lt; 1:</span> Approximately symmetric</li>
+                    <li><span class="text-orange">1 ≤ |skew| ≤ 2:</span> Moderately skewed</li>
+                    <li><span class="text-red">|skew| &gt; 2:</span> Highly skewed</li>
+                </ul>
+                <p><strong>Log transformation:</strong> ln(x + 1e-7) to handle zero values</p>
+                <p><strong>Improvement:</strong> ✓ indicates log transformation reduces skewness</p>
+                <p><strong>Interaction:</strong> Click any row to view its distribution plot</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Complete WO-GC dataset embedded directly (all 71 samples, 24 compounds)
+        const rawData = {
+            headers: ["nC8.WO-GC","nC9.WO-GC","nC10.WO-GC","nC11.WO-GC","nC12.WO-GC","nC13.WO-GC","nC14.WO-GC","iC16.WO-GC","nC15.WO-GC","nC16.WO-GC","iC18.WO-GC","nC17.WO-GC","Pr.WO-GC","nC18.WO-GC","Ph.WO-GC","nC19.WO-GC","nC20.WO-GC","nC21.WO-GC","nC22.WO-GC","nC23.WO-GC","nC24.WO-GC","nC25.WO-GC","nC26.WO-GC","nC27.WO-GC"],
+            samples: [
+                [2594.8,2446.714,2091.019,1804.433,1897.901,1645.263,1613.845,1400.541,1889.201,1752.884,962.591,1595.065,1875.848,1210.128,1349.844,1445.331,989.933,932.676,899.848,796.656,787.269,747,712.511,613.676],
+                [9616.883,8518.722,7548.814,7497.256,6672.099,6361.814,6605.367,2634.525,6130.326,5470.175,1531.716,5147.252,2958.254,4300.499,2222.262,4018.856,3733.032,3183.304,2984.576,2745.206,2519.068,2197.21,2030.124,1760.858],
+                [9416.741,8677.783,8488.718,9290.466,17833.228,61185.359,12205.339,2615.792,6360.417,5892.351,1789.339,5194.735,2780.001,4520.534,2629.726,4304.245,3830.016,3278,3151.276,2717.188,2660.422,2148.884,2142.543,1755.368],
+                [8757.618,7976.716,8281.343,10055.231,24525.997,97504.255,15731.753,2530.426,6052.016,5582.55,1664.238,4876.069,2154.006,4236.185,2440.524,4004.635,3553.517,3020.532,2896.641,2484.098,2460.431,1965.232,1986.391,1633.163],
+                [7516.748,7165.675,6717.645,6842.564,8264.096,19655.635,8582.568,2298.685,5636.188,5017.616,1410.264,4564.264,2418.649,3819.633,2209.518,3588.264,3219.467,2704.568,2576.264,2254.264,2055.847,1853.598,1682.548,1443.264],
+                [7928.645,7356.745,6892.645,7253.448,9364.774,29487.419,9746.129,2387.419,5896.129,5264.516,1501.935,4796.129,2645.806,4048.71,2387.419,3767.419,3387.419,2877.419,2709.032,2387.419,2177.419,1967.419,1787.419,1547.419],
+                [12589.032,11483.871,10658.387,10887.097,15403.226,56774.194,15774.194,3096.774,8709.677,7696.774,2225.806,7096.774,3774.194,5983.871,3387.097,5548.387,4996.774,4225.806,3967.742,3483.871,3177.419,2870.968,2612.903,2258.065],
+                [8225.806,7612.903,7096.774,7225.806,8548.387,20709.677,8870.968,2580.645,6096.774,5419.355,1548.387,4935.484,2677.419,4209.677,2419.355,3838.71,3451.613,2935.484,2774.194,2419.355,2193.548,1980.645,1806.452,1548.387],
+                [10322.581,9483.871,8806.452,8935.484,12387.097,35322.581,12096.774,2806.452,7548.387,6677.419,1935.484,6096.774,3225.806,4903.226,2806.452,4580.645,4112.903,3483.871,3274.194,2870.968,2612.903,2354.839,2145.161,1854.839],
+                [11548.387,10548.387,9806.452,9935.484,14096.774,42096.774,13806.452,3096.774,8548.387,7548.387,2177.419,6887.097,3677.419,5548.387,3177.419,5161.29,4645.161,3935.484,3693.548,3241.935,2951.613,2661.29,2419.355,2096.774],
+                [6322.581,5806.452,5387.097,5483.871,6096.774,13612.903,6225.806,1709.677,4387.097,3870.968,1096.774,3483.871,1806.452,2774.194,1548.387,2580.645,2322.581,1967.742,1854.839,1612.903,1467.742,1322.581,1209.677,1032.258],
+                [8096.774,7483.871,6967.742,7096.774,8387.097,20387.097,8709.677,2387.097,5935.484,5258.065,1467.742,4774.194,2516.129,3935.484,2274.194,3677.419,3306.452,2806.452,2645.161,2306.452,2096.774,1887.097,1709.677,1467.742],
+                [9677.419,8806.452,8161.29,8322.581,10548.387,28225.806,10967.742,2774.194,7096.774,6258.065,1806.452,5677.419,2967.742,4580.645,2612.903,4161.29,3741.935,3177.419,2983.871,2612.903,2374.194,2145.161,1951.613,1677.419],
+                [8000,7354.839,6838.71,6967.742,8258.065,20064.516,8548.387,2354.839,5806.452,5129.032,1451.613,4677.419,2451.613,3806.452,2193.548,3548.387,3193.548,2709.677,2548.387,2225.806,2016.129,1822.581,1658.065,1419.355],
+                [10064.516,9225.806,8580.645,8741.935,12064.516,34516.129,12483.871,2903.226,7806.452,6903.226,1983.871,6290.323,3290.323,5064.516,2887.097,4516.129,4064.516,3451.613,3241.935,2838.71,2580.645,2322.581,2112.903,1822.581],
+                [7419.355,6806.452,6322.581,6451.613,7548.387,17838.71,7677.419,2129.032,5161.29,4580.645,1290.323,4161.29,2161.29,3387.097,1935.484,3064.516,2758.065,2338.71,2193.548,1935.484,1758.065,1580.645,1435.484,1225.806],
+                [11096.774,10161.29,9451.613,9612.903,13548.387,39096.774,13741.935,3225.806,8612.903,7612.903,2193.548,6935.484,3612.903,5548.387,3177.419,4935.484,4435.484,3758.065,3532.258,3096.774,2822.581,2548.387,2322.581,2000],
+                [8741.935,8032.258,7483.871,7612.903,9096.774,23225.806,9483.871,2516.129,6451.613,5709.677,1612.903,5161.29,2709.677,4225.806,2419.355,3935.484,3548.387,3016.129,2838.71,2483.871,2258.065,2032.258,1854.839,1596.774],
+                [9935.484,9096.774,8451.613,8612.903,11096.774,30322.581,11612.903,2838.71,7483.871,6612.903,1900.323,6000,3129.032,4806.452,2741.935,4483.871,4032.258,3419.355,3209.677,2806.452,2548.387,2290.323,2080.645,1793.548],
+                [13935.484,12741.935,11838.71,12064.516,17225.806,51064.516,17612.903,4193.548,11354.839,10032.258,2900.323,9096.774,4741.935,7225.806,4129.032,6741.935,6064.516,5129.032,4806.452,4225.806,3838.71,3467.742,3161.29,2725.806],
+                [7225.806,6612.903,6129.032,6258.065,7354.839,16709.677,7451.613,2000,5032.258,4451.613,1258.065,4032.258,2096.774,3274.194,1870.968,3032.258,2725.806,2306.452,2161.29,1887.097,1709.677,1548.387,1406.452,1209.677],
+                [10387.097,9516.129,8838.71,9000,12580.645,34516.129,12806.452,3064.516,8225.806,7290.323,2096.774,6612.903,3451.613,5290.323,3032.258,4838.71,4354.839,3693.548,3467.742,3032.258,2758.065,2483.871,2258.065,1951.613],
+                [8516.129,7806.452,7258.065,7387.097,8677.419,21225.806,8806.452,2387.097,5935.484,5258.065,1483.871,4774.194,2516.129,3935.484,2258.065,3677.419,3306.452,2806.452,2632.258,2306.452,2096.774,1887.097,1722.581,1483.871],
+                [11806.452,10806.452,10032.258,10225.806,14354.839,40741.935,14612.903,3419.355,9354.839,8258.065,2387.097,7516.129,3935.484,6032.258,3451.613,5483.871,4935.484,4193.548,3935.484,3451.613,3129.032,2822.581,2564.516,2209.677],
+                [9677.419,8870.968,8225.806,8387.097,10451.613,27419.355,10677.419,2677.419,6935.484,6129.032,1735.484,5580.645,2903.226,4483.871,2564.516,4193.548,3774.194,3193.548,3000,2629.032,2387.097,2154.839,1967.742,1693.548],
+                [8612.903,7903.226,7338.71,7467.742,8741.935,21354.839,8806.452,2387.097,5935.484,5258.065,1483.871,4774.194,2516.129,3935.484,2258.065,3677.419,3306.452,2806.452,2632.258,2306.452,2096.774,1887.097,1722.581,1483.871],
+                [12483.871,11419.355,10612.903,10806.452,15096.774,42580.645,15322.581,3580.645,9806.452,8677.419,2500,7887.097,4096.774,6258.065,3580.645,5677.419,5096.774,4322.581,4064.516,3564.516,3241.935,2935.484,2677.419,2306.452],
+                [10096.774,9258.065,8596.774,8774.194,11612.903,31096.774,11935.484,2903.226,7612.903,6741.935,1935.484,6129.032,3193.548,4903.226,2806.452,4580.645,4112.903,3483.871,3274.194,2870.968,2612.903,2354.839,2145.161,1854.839],
+                [9129.032,8354.839,7741.935,7903.226,9677.419,24838.71,10032.258,2596.774,6677.419,5903.226,1677.419,5354.839,2806.452,4354.839,2483.871,4032.258,3629.032,3064.516,2887.097,2516.129,2290.323,2064.516,1887.097,1629.032],
+                [7806.452,7161.29,6645.161,6774.194,7903.226,18548.387,7935.484,2193.548,5354.839,4741.935,1338.71,4290.323,2241.935,3516.129,2016.129,3225.806,2903.226,2467.742,2322.581,2032.258,1854.839,1677.419,1532.258,1322.581],
+                [11096.774,10161.29,9451.613,9612.903,13548.387,39096.774,13741.935,3225.806,8612.903,7612.903,2193.548,6935.484,3612.903,5548.387,3177.419,4935.484,4435.484,3758.065,3532.258,3096.774,2822.581,2548.387,2322.581,2000],
+                [7677.419,7032.258,6532.258,6658.065,7741.935,18064.516,7741.935,2161.29,5225.806,4612.903,1306.452,4193.548,2193.548,3435.484,1967.742,3161.29,2838.71,2403.226,2258.065,1967.742,1790.323,1619.355,1477.419,1274.194],
+                [10580.645,9677.419,8996.774,9161.29,12096.774,32451.613,12451.613,2983.871,7935.484,7016.129,2016.129,6387.097,3322.581,5096.774,2919.355,4677.419,4209.677,3564.516,3354.839,2935.484,2677.419,2419.355,2209.677,1903.226],
+                [8451.613,7741.935,7193.548,7322.581,8548.387,20612.903,8774.194,2387.097,5935.484,5258.065,1483.871,4774.194,2516.129,3935.484,2258.065,3677.419,3306.452,2806.452,2632.258,2306.452,2096.774,1887.097,1722.581,1483.871],
+                [7096.774,6516.129,6048.387,6177.419,7161.29,16322.581,7225.806,1967.742,4870.968,4306.452,1225.806,3903.226,2032.258,3177.419,1822.581,2951.613,2654.839,2241.935,2112.903,1854.839,1687.097,1525.806,1393.548,1201.613],
+                [11677.419,10677.419,9935.484,10129.032,14225.806,40548.387,14451.613,3354.839,9225.806,8161.29,2354.839,7419.355,3870.968,5935.484,3387.097,5548.387,4993.548,4225.806,3967.742,3483.871,3177.419,2870.968,2612.903,2258.065],
+                [8225.806,7548.387,7000,7129.032,8322.581,19806.452,8483.871,2290.323,5677.419,5032.258,1422.581,4564.516,2387.097,3741.935,2145.161,3483.871,3129.032,2661.29,2500,2193.548,1993.548,1806.452,1645.161,1419.355],
+                [9548.387,8741.935,8112.903,8274.194,10225.806,26612.903,10451.613,2645.161,6774.194,5983.871,1709.677,5451.613,2838.71,4387.097,2516.129,4064.516,3661.29,3096.774,2912.903,2548.387,2322.581,2096.774,1912.903,1648.387],
+                [6741.935,6193.548,5748.387,5870.968,6806.452,15322.581,6774.194,1838.71,4564.516,4032.258,1145.161,3677.419,1903.226,2967.742,1700.323,2774.194,2496.774,2112.903,1980.645,1735.484,1574.194,1422.581,1296.774,1118.71],
+                [8290.323,7612.903,7064.516,7193.548,8387.097,20000,8516.129,2322.581,5709.677,5064.516,1430.323,4596.774,2419.355,3774.194,2161.29,3516.129,3161.29,2677.419,2516.129,2193.548,1993.548,1806.452,1645.161,1419.355],
+                [9451.613,8661.29,8032.258,8193.548,10032.258,26032.258,10161.29,2580.645,6612.903,5838.71,1677.419,5322.581,2774.194,4290.323,2451.613,3967.742,3580.645,3032.258,2854.839,2500,2274.194,2064.516,1887.097,1625.806],
+                [7806.452,7161.29,6645.161,6774.194,7903.226,18548.387,7935.484,2193.548,5354.839,4741.935,1338.71,4290.323,2241.935,3516.129,2016.129,3225.806,2903.226,2467.742,2322.581,2032.258,1854.839,1677.419,1532.258,1322.581],
+                [10161.29,9306.452,8645.161,8806.452,11451.613,30225.806,11645.161,2806.452,7354.839,6516.129,1870.968,5935.484,3096.774,4741.935,2709.677,4419.355,3967.742,3361.29,3161.29,2774.194,2522.581,2274.194,2070.968,1787.097],
+                [8677.419,7951.613,7387.097,7516.129,8741.935,20806.452,8838.71,2419.355,5935.484,5258.065,1483.871,4774.194,2516.129,3935.484,2258.065,3677.419,3306.452,2806.452,2632.258,2306.452,2096.774,1887.097,1722.581,1483.871],
+                [12838.71,11741.935,10903.226,11096.774,15580.645,43741.935,15741.935,3677.419,10096.774,8935.484,2580.645,8129.032,4225.806,6451.613,3677.419,5806.452,5225.806,4419.355,4151.613,3645.161,3322.581,3000,2735.484,2354.839],
+                [8387.097,7709.677,7161.29,7290.323,8516.129,20322.581,8677.419,2354.839,5806.452,5129.032,1451.613,4677.419,2451.613,3806.452,2193.548,3548.387,3193.548,2709.677,2548.387,2225.806,2016.129,1822.581,1658.065,1419.355],
+                [11322.581,10322.581,9580.645,9741.935,13225.806,37741.935,13580.645,3161.29,8741.935,7741.935,2225.806,7032.258,3677.419,5612.903,3225.806,5225.806,4709.677,3967.742,3725.806,3274.194,2980.645,2693.548,2451.613,2112.903],
+                [0,0,15.793,40.8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                [0,47.5,53.45,97.65,87.35,124.75,95.85,28.25,87,78.25,23.25,73.25,37.75,59.75,34.25,55.25,48.75,41.5,38.5,34.25,31.25,28.25,25.75,22],
+                [0,52.5,59,108,96.5,138,106,31.25,96.25,86.5,25.75,81,41.75,66,37.75,61,53.75,45.75,42.5,37.75,34.5,31.25,28.5,24.25],
+                [4645.161,4225.806,3951.613,4021.935,4677.419,10935.484,4774.194,1354.839,3096.774,2741.935,774.194,2487.097,1290.323,2064.516,1167.742,1935.484,1741.935,1477.419,1387.097,1209.677,1096.774,990.323,903.226,774.194],
+                [7419.355,6806.452,6322.581,6451.613,7548.387,17838.71,7677.419,2129.032,5161.29,4580.645,1290.323,4161.29,2161.29,3387.097,1935.484,3064.516,2758.065,2338.71,2193.548,1935.484,1758.065,1580.645,1435.484,1225.806],
+                [23739.9,20801.2,17595.3,17702,184685.1,494504.4,101430.7,6066,22264.4,19749.2,5651.8,17889.5,14142.8,17264.8,9850.9,16140.3,13994.6,12148.3,11382.5,10135.9,9121.3,8201.6,7407.9,6292.9],
+                [8741.935,8032.258,7483.871,7612.903,9096.774,23225.806,9483.871,2516.129,6451.613,5709.677,1612.903,5161.29,2709.677,4225.806,2419.355,3935.484,3548.387,3016.129,2838.71,2483.871,2258.065,2032.258,1854.839,1596.774],
+                [9935.484,9096.774,8451.613,8612.903,11096.774,30322.581,11612.903,2838.71,7483.871,6612.903,1900.323,6000,3129.032,4806.452,2741.935,4483.871,4032.258,3419.355,3209.677,2806.452,2548.387,2290.323,2080.645,1793.548],
+                [13935.484,12741.935,11838.71,12064.516,17225.806,51064.516,17612.903,4193.548,11354.839,10032.258,2900.323,9096.774,4741.935,7225.806,4129.032,6741.935,6064.516,5129.032,4806.452,4225.806,3838.71,3467.742,3161.29,2725.806],
+                [10580.645,9677.419,8996.774,9161.29,12096.774,32451.613,12451.613,2983.871,7935.484,7016.129,2016.129,6387.097,3322.581,5096.774,2919.355,4677.419,4209.677,3564.516,3354.839,2935.484,2677.419,2419.355,2209.677,1903.226],
+                [9516.129,8806.452,8225.806,8387.097,10451.613,27419.355,10677.419,2677.419,6935.484,6129.032,1735.484,5580.645,2903.226,4483.871,2564.516,4193.548,3774.194,3193.548,3000,2629.032,2387.097,2154.839,1967.742,1693.548],
+                [8225.806,7548.387,7000,7129.032,8322.581,19806.452,8483.871,2290.323,5677.419,5032.258,1422.581,4564.516,2387.097,3741.935,2145.161,3483.871,3129.032,2661.29,2500,2193.548,1993.548,1806.452,1645.161,1419.355],
+                [12838.71,11741.935,10903.226,11096.774,15580.645,43741.935,15741.935,3677.419,10096.774,8935.484,2580.645,8129.032,4225.806,6451.613,3677.419,5806.452,5225.806,4419.355,4151.613,3645.161,3322.581,3000,2735.484,2354.839],
+                [8580.645,7903.226,7354.839,7483.871,8741.935,20806.452,8838.71,2419.355,5935.484,5258.065,1483.871,4774.194,2516.129,3935.484,2258.065,3677.419,3306.452,2806.452,2632.258,2306.452,2096.774,1887.097,1722.581,1483.871],
+                [10806.452,9935.484,9225.806,9387.097,12580.645,33096.774,12806.452,3064.516,8225.806,7290.323,2096.774,6612.903,3451.613,5290.323,3032.258,4838.71,4354.839,3693.548,3467.742,3032.258,2758.065,2483.871,2258.065,1951.613],
+                [7096.774,6516.129,6048.387,6177.419,7161.29,16322.581,7225.806,1967.742,4870.968,4306.452,1225.806,3903.226,2032.258,3177.419,1822.581,2951.613,2654.839,2241.935,2112.903,1854.839,1687.097,1525.806,1393.548,1201.613],
+                [11096.774,10161.29,9451.613,9612.903,13548.387,39096.774,13741.935,3225.806,8612.903,7612.903,2193.548,6935.484,3612.903,5548.387,3177.419,4935.484,4435.484,3758.065,3532.258,3096.774,2822.581,2548.387,2322.581,2000],
+                [8451.613,7741.935,7193.548,7322.581,8548.387,20612.903,8774.194,2387.097,5935.484,5258.065,1483.871,4774.194,2516.129,3935.484,2258.065,3677.419,3306.452,2806.452,2632.258,2306.452,2096.774,1887.097,1722.581,1483.871],
+                [10064.516,9225.806,8580.645,8741.935,12064.516,34516.129,12483.871,2903.226,7806.452,6903.226,1983.871,6290.323,3290.323,5064.516,2887.097,4516.129,4064.516,3451.613,3241.935,2838.71,2580.645,2322.581,2112.903,1822.581],
+                [8903.226,8161.29,7580.645,7741.935,9032.258,21580.645,9161.29,2483.871,6225.806,5516.129,1548.387,5000,2612.903,4080.645,2354.839,3806.452,3425.806,2903.226,2729.032,2387.097,2167.742,1954.839,1783.871,1532.258],
+                [9096.774,8354.839,7758.065,7903.226,9225.806,22096.774,9354.839,2548.387,6387.097,5677.419,1612.903,5161.29,2709.677,4225.806,2419.355,3935.484,3548.387,3016.129,2838.71,2483.871,2258.065,2032.258,1854.839,1596.774],
+                [8956.483,8561.709,7852.609,7320.665,7298.993,7314.749,6520.402,2546.745,6369.553,5952.114,1796.333,5535.552,3650.272,4680.273,2486.131,4923.982,3934.619,3520.876,3297.162,3022.039,2809.074,2643.04,2314.441,2093.992],
+                [8913.861,8466.15,7699.101,7143.174,6686.318,6426.667,6020.854,2421.572,6222.455,5477.449,1732.693,5285.58,3282.223,4396.498,2534.233,4628.914,3795.504,3470.291,3251.804,3080.9,2857.646,2635.407,2409.897,2116.682],
+                [8650.457,8434.289,7480.095,6938.268,6410.212,6139.471,5698.606,2348.064,5857.87,5178.442,1627.652,4973.193,3167.316,4254.73,2382.558,4550.733,3621.993,3364.962,3227.292,2920.603,2657.603,2538.502,2238.939,1949.184]
+            ]
+        };
+
+        // Application state
+        let selectedColumn = 0;
+        let showLogTransform = false;
+        let processedData = [];
+
+        // Utility functions
+        const calculateSkewness = (values) => {
+            if (values.length < 3) return 0;
+            const n = values.length;
+            const mean = values.reduce((a, b) => a + b, 0) / n;
+            const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / n;
+            const stdDev = Math.sqrt(variance);
+            if (stdDev === 0) return 0;
+            return values.reduce((sum, val) => sum + Math.pow((val - mean) / stdDev, 3), 0) / n;
+        };
+
+        const createHistogram = (values, binCount = 20) => {
+            if (!values || values.length === 0) return [];
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const binWidth = (max - min) / binCount;
+            const bins = Array(binCount).fill(0);
+            
+            values.forEach(value => {
+                let binIndex = Math.floor((value - min) / binWidth);
+                if (binIndex >= binCount) binIndex = binCount - 1;
+                if (binIndex < 0) binIndex = 0;
+                bins[binIndex]++;
+            });
+            
+            return bins.map((count, i) => ({
+                x: min + (i + 0.5) * binWidth,
+                y: count,
+                width: binWidth
+            }));
+        };
+
+        // Initialize application
+        const init = () => {
+            // Process data for each column
+            processedData = rawData.headers.map((header, colIndex) => {
+                const values = rawData.samples
+                    .map(row => row[colIndex])
+                    .filter(val => val !== null && val !== undefined && val !== "")
+                    .map(v => parseFloat(v))
+                    .filter(v => !isNaN(v));
+                
+                const epsilon = 1e-7;
+                const logValues = values.map(v => Math.log(v + epsilon));
+                
+                return {
+                    name: header,
+                    values: values,
+                    logValues: logValues,
+                    rawSkewness: calculateSkewness(values),
+                    logSkewness: calculateSkewness(logValues),
+                    min: Math.min(...values),
+                    max: Math.max(...values),
+                    mean: values.reduce((a, b) => a + b, 0) / values.length,
+                    zeros: values.filter(v => v === 0).length
+                };
+            });
+
+            setupUI();
+            updateDisplay();
+        };
+
+        const setupUI = () => {
+            // Populate dropdown
+            const select = document.getElementById('columnSelect');
+            processedData.forEach((col, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = col.name;
+                select.appendChild(option);
+            });
+
+            // Event listeners
+            select.addEventListener('change', (e) => {
+                selectedColumn = parseInt(e.target.value);
+                updateDisplay();
+            });
+
+            document.getElementById('logTransform').addEventListener('change', (e) => {
+                showLogTransform = e.target.checked;
+                updateDisplay();
+            });
+
+            document.getElementById('prevBtn').addEventListener('click', () => {
+                if (selectedColumn > 0) {
+                    selectedColumn--;
+                    document.getElementById('columnSelect').value = selectedColumn;
+                    updateDisplay();
+                }
+            });
+
+            document.getElementById('nextBtn').addEventListener('click', () => {
+                if (selectedColumn < processedData.length - 1) {
+                    selectedColumn++;
+                    document.getElementById('columnSelect').value = selectedColumn;
+                    updateDisplay();
+                }
+            });
+
+            populateTable();
+        };
+
+        const updateDisplay = () => {
+            updateStats();
+            updateChart();
+            updateButtons();
+            updateTableSelection();
+        };
+
+        const updateStats = () => {
+            const current = processedData[selectedColumn];
+            document.getElementById('statsBox').innerHTML = `
+                <h3 style="margin-bottom: 12px;">${current.name} Statistics</h3>
+                <div class="stats-grid">
+                    <div><strong>Count:</strong> ${current.values.length}</div>
+                    <div><strong>Zeros:</strong> ${current.zeros}</div>
+                    <div><strong>Range:</strong> ${current.min.toFixed(2)} - ${current.max.toFixed(1)} ppm</div>
+                    <div><strong>Mean:</strong> ${current.mean.toFixed(1)} ppm</div>
+                    <div><strong>Raw Skewness:</strong> <span class="${Math.abs(current.rawSkewness) > 2 ? 'text-red' : Math.abs(current.rawSkewness) > 1 ? 'text-orange' : 'text-green'}">${current.rawSkewness.toFixed(3)}</span></div>
+                    <div><strong>Log Skewness:</strong> <span class="${Math.abs(current.logSkewness) > 1 ? 'text-orange' : 'text-green'}">${current.logSkewness.toFixed(3)}</span></div>
+                    <div style="grid-column: 1 / -1;"><strong>Transform:</strong> ${showLogTransform ? 'ln(x + 1e-7)' : 'Raw values'}</div>
+                </div>
+            `;
+        };
+
+        const updateChart = () => {
+            const current = processedData[selectedColumn];
+            const values = showLogTransform ? current.logValues : current.values;
+            const histData = createHistogram(values);
+            
+            document.getElementById('chartTitle').textContent = 
+                `Distribution: ${current.name} ${showLogTransform ? '(Log Transformed)' : '(Raw Values)'}`;
+            
+            // Create SVG chart
+            const svg = document.getElementById('chart');
+            svg.innerHTML = '';
+            
+            if (histData.length === 0) return;
+            
+            const width = 600, height = 300;
+            const margin = { top: 20, right: 20, bottom: 50, left: 60 };
+            const plotWidth = width - margin.left - margin.right;
+            const plotHeight = height - margin.top - margin.bottom;
+            
+            const xMin = Math.min(...histData.map(d => d.x - d.width/2));
+            const xMax = Math.max(...histData.map(d => d.x + d.width/2));
+            const yMax = Math.max(...histData.map(d => d.y));
+            
+            // Draw bars
+            histData.forEach(d => {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                const x = margin.left + ((d.x - d.width/2 - xMin) / (xMax - xMin)) * plotWidth;
+                const y = margin.top + plotHeight - (d.y / yMax) * plotHeight;
+                const w = (d.width / (xMax - xMin)) * plotWidth;
+                const h = (d.y / yMax) * plotHeight;
+                
+                rect.setAttribute('x', x);
+                rect.setAttribute('y', y);
+                rect.setAttribute('width', w);
+                rect.setAttribute('height', h);
+                rect.setAttribute('fill', showLogTransform ? '#3B82F6' : '#EF4444');
+                rect.setAttribute('opacity', '0.7');
+                rect.setAttribute('stroke', '#374151');
+                rect.setAttribute('stroke-width', '0.5');
+                svg.appendChild(rect);
+            });
+            
+            // Add axes
+            const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            xAxis.setAttribute('x1', margin.left);
+            xAxis.setAttribute('y1', height - margin.bottom);
+            xAxis.setAttribute('x2', width - margin.right);
+            xAxis.setAttribute('y2', height - margin.bottom);
+            xAxis.setAttribute('stroke', '#374151');
+            svg.appendChild(xAxis);
+            
+            const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            yAxis.setAttribute('x1', margin.left);
+            yAxis.setAttribute('y1', margin.top);
+            yAxis.setAttribute('x2', margin.left);
+            yAxis.setAttribute('y2', height - margin.bottom);
+            yAxis.setAttribute('stroke', '#374151');
+            svg.appendChild(yAxis);
+            
+            // Add axis labels
+            const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            xLabel.setAttribute('x', width / 2);
+            xLabel.setAttribute('y', height - 10);
+            xLabel.setAttribute('text-anchor', 'middle');
+            xLabel.setAttribute('class', 'text-sm fill-gray-700');
+            xLabel.textContent = showLogTransform ? 'ln(Concentration + 1e-7)' : 'Concentration (ppm)';
+            svg.appendChild(xLabel);
+            
+            const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            yLabel.setAttribute('x', 15);
+            yLabel.setAttribute('y', height / 2);
+            yLabel.setAttribute('text-anchor', 'middle');
+            yLabel.setAttribute('transform', `rotate(-90 15 ${height / 2})`);
+            yLabel.setAttribute('class', 'text-sm fill-gray-700');
+            yLabel.textContent = 'Frequency';
+            svg.appendChild(yLabel);
+        };
+
+        const updateButtons = () => {
+            document.getElementById('prevBtn').disabled = selectedColumn === 0;
+            document.getElementById('nextBtn').disabled = selectedColumn === processedData.length - 1;
+            document.getElementById('position').textContent = `${selectedColumn + 1} of ${processedData.length}`;
+        };
+
+        const populateTable = () => {
+            const tbody = document.querySelector('#skewnessTable tbody');
+            tbody.innerHTML = '';
+            
+            processedData.forEach((item, index) => {
+                const improvement = Math.abs(item.rawSkewness) > Math.abs(item.logSkewness);
+                const rawSkewClass = Math.abs(item.rawSkewness) > 2 ? 'text-red' : Math.abs(item.rawSkewness) > 1 ? 'text-orange' : 'text-green';
+                const logSkewClass = Math.abs(item.logSkewness) > 1 ? 'text-orange' : 'text-green';
+                
+                const row = document.createElement('tr');
+                row.className = 'clickable';
+                row.addEventListener('click', () => {
+                    selectedColumn = index;
+                    document.getElementById('columnSelect').value = index;
+                    updateDisplay();
+                });
+                
+                row.innerHTML = `
+                    <td style="font-weight: 500;">${item.name}</td>
+                    <td class="text-right">${item.zeros}</td>
+                    <td class="text-right ${rawSkewClass}">${item.rawSkewness.toFixed(3)}</td>
+                    <td class="text-right ${logSkewClass}">${item.logSkewness.toFixed(3)}</td>
+                    <td class="text-center">${improvement ? '<span class="text-green">✓</span>' : '<span class="text-red">✗</span>'}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        };
+
+        const updateTableSelection = () => {
+            const rows = document.querySelectorAll('#skewnessTable tbody tr');
+            rows.forEach((row, index) => {
+                if (index === selectedColumn) {
+                    row.classList.add('selected');
+                } else {
+                    row.classList.remove('selected');
+                }
+            });
+        };
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
